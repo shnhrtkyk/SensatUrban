@@ -1,4 +1,4 @@
-from os.path import join, exists, dirname, abspath
+from os.path import join, exists, dirname, abspath, basename
 from RandLANet import Network
 from tester_SensatUrban import ModelTester
 from helper_ply import read_ply
@@ -12,9 +12,10 @@ import time, pickle, argparse, glob, os, shutil
 
 class SensatUrban:
     def __init__(self):
-        self.name = 'SensatUrban'
-        root_path = '/media/qingyong/data/Dataset'  # path to the dataset
+        self.name = 'SensatUrban_Dataset'
+        root_path = 'C:/Users/hp/Downloads/Sensat/'  # path to the dataset
         self.path = join(root_path, self.name)
+        print(self.path )
         self.label_to_names = {0: 'Ground', 1: 'High Vegetation', 2: 'Buildings', 3: 'Walls',
                                4: 'Bridge', 5: 'Parking', 6: 'Rail', 7: 'traffic Roads', 8: 'Street Furniture',
                                9: 'Cars', 10: 'Footpath', 11: 'Bikes', 12: 'Water'}
@@ -24,6 +25,8 @@ class SensatUrban:
         self.ignored_labels = np.array([])
 
         self.all_files = np.sort(glob.glob(join(self.path, 'original_block_ply', '*.ply')))
+        print(self.all_files )
+
         self.val_file_name = ['birmingham_block_1',
                               'birmingham_block_5',
                               'cambridge_block_10',
@@ -51,10 +54,14 @@ class SensatUrban:
 
     def load_sub_sampled_clouds(self, sub_grid_size):
         tree_path = join(self.path, 'grid_{:.3f}'.format(sub_grid_size))
+        print(tree_path)
 
         for i, file_path in enumerate(self.all_files):
             t0 = time.time()
-            cloud_name = file_path.split('/')[-1][:-4]
+            # cloud_name = file_path.split('/')[-1][:-4]
+            cloud_name = basename(file_path)[:-4]
+
+            print(cloud_name)
             if cloud_name in self.test_file_name:
                 cloud_split = 'test'
             elif cloud_name in self.val_file_name:
@@ -191,10 +198,10 @@ class SensatUrban:
             input_up_samples = []
 
             for i in range(cfg.num_layers):
-                neighbour_idx = tf.py_func(DP.knn_search, [batch_xyz, batch_xyz, cfg.k_n], tf.int32)
+                neighbour_idx = tf.numpy_function(DP.knn_search, [batch_xyz, batch_xyz, cfg.k_n], tf.int32)
                 sub_points = batch_xyz[:, :tf.shape(batch_xyz)[1] // cfg.sub_sampling_ratio[i], :]
                 pool_i = neighbour_idx[:, :tf.shape(batch_xyz)[1] // cfg.sub_sampling_ratio[i], :]
-                up_i = tf.py_func(DP.knn_search, [sub_points, batch_xyz, 1], tf.int32)
+                up_i = tf.numpy_function(DP.knn_search, [sub_points, batch_xyz, 1], tf.int32)
                 input_points.append(batch_xyz)
                 input_neighbors.append(neighbour_idx)
                 input_pools.append(pool_i)
@@ -231,9 +238,12 @@ class SensatUrban:
         self.batch_val_data = self.batch_val_data.prefetch(cfg.val_batch_size)
         self.batch_test_data = self.batch_test_data.prefetch(cfg.val_batch_size)
 
-        iter = tf.data.Iterator.from_structure(self.batch_train_data.output_types, self.batch_train_data.output_shapes)
-        self.flat_inputs = iter.get_next()
+        # iter = tf.compat.v1.data.Iterator.from_structure(self.batch_train_data.output_types, self.batch_train_data.output_shapes)
+        iter = tf.compat.v1.data.Iterator.from_structure(tf.compat.v1.data.get_output_types(self.batch_train_data),
+                                           tf.compat.v1.data.get_output_shapes(self.batch_train_data))
+     
         self.train_init_op = iter.make_initializer(self.batch_train_data)
+        self.flat_inputs = iter.get_next()
         self.val_init_op = iter.make_initializer(self.batch_val_data)
         self.test_init_op = iter.make_initializer(self.batch_test_data)
 

@@ -6,7 +6,7 @@ import tensorflow as tf
 import numpy as np
 import tf_util
 import time
-
+tf.compat.v1.disable_eager_execution()
 
 def log_out(out_str, f_out):
     f_out.write(out_str + '\n')
@@ -27,7 +27,7 @@ class Network:
                 self.saving_path = self.config.saving_path
             makedirs(self.saving_path) if not exists(self.saving_path) else None
 
-        with tf.variable_scope('inputs'):
+        with tf.compat.v1.variable_scope('inputs'):
             self.inputs = dict()
             num_layers = self.config.num_layers
             self.inputs['xyz'] = flat_inputs[:num_layers]
@@ -40,7 +40,7 @@ class Network:
             self.inputs['cloud_inds'] = flat_inputs[4 * num_layers + 3]
 
             self.labels = self.inputs['labels']
-            self.is_training = tf.placeholder(tf.bool, shape=())
+            self.is_training = tf.compat.v1.placeholder(tf.bool, shape=())
             self.training_step = 1
             self.training_epoch = 0
             self.correct_prediction = 0
@@ -50,10 +50,10 @@ class Network:
             self.class_weights = DP.get_class_weights(dataset.num_per_class, self.loss_type)
             self.Log_file = open('log_train_' + dataset.name + '.txt', 'a')
 
-        with tf.variable_scope('layers'):
+        with tf.compat.v1.variable_scope('layers'):
             self.logits = self.inference(self.inputs, self.is_training)
 
-        with tf.variable_scope('loss'):
+        with tf.compat.v1.variable_scope('loss'):
             self.logits = tf.reshape(self.logits, [-1, config.num_classes])
             self.labels = tf.reshape(self.labels, [-1])
 
@@ -76,35 +76,35 @@ class Network:
 
             self.loss = self.get_loss(valid_logits, valid_labels, self.class_weights)
 
-        with tf.variable_scope('optimizer'):
+        with tf.compat.v1.variable_scope('optimizer'):
             self.learning_rate = tf.Variable(config.learning_rate, trainable=False, name='learning_rate')
-            self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
-            self.extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+            self.train_op = tf.compat.v1.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
+            self.extra_update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
 
-        with tf.variable_scope('results'):
-            self.correct_prediction = tf.nn.in_top_k(valid_logits, valid_labels, 1)
+        with tf.compat.v1.variable_scope('results'):
+            self.correct_prediction = tf.compat.v1.math.in_top_k(tf.cast(valid_logits, tf.float32), tf.cast(valid_labels, tf.int32), 1)
             self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, tf.float32))
             self.prob_logits = tf.nn.softmax(self.logits)
 
-            tf.summary.scalar('learning_rate', self.learning_rate)
-            tf.summary.scalar('loss', self.loss)
-            tf.summary.scalar('accuracy', self.accuracy)
+            tf.compat.v1.summary.scalar('learning_rate', self.learning_rate)
+            tf.compat.v1.summary.scalar('loss', self.loss)
+            tf.compat.v1.summary.scalar('accuracy', self.accuracy)
 
-        my_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
-        self.saver = tf.train.Saver(my_vars, max_to_keep=1)
-        c_proto = tf.ConfigProto()
+        my_vars = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.GLOBAL_VARIABLES)
+        self.saver = tf.compat.v1.train.Saver(my_vars, max_to_keep=1)
+        c_proto = tf.compat.v1.ConfigProto()
         c_proto.gpu_options.allow_growth = True
-        self.sess = tf.Session(config=c_proto)
-        self.merged = tf.summary.merge_all()
-        self.train_writer = tf.summary.FileWriter(config.train_sum_dir, self.sess.graph)
-        self.sess.run(tf.global_variables_initializer())
+        self.sess = tf.compat.v1.Session(config=c_proto)
+        self.merged = tf.compat.v1.summary.merge_all()
+        self.train_writer = tf.compat.v1.summary.FileWriter(config.train_sum_dir, self.sess.graph)
+        self.sess.run( tf.compat.v1.global_variables_initializer())
 
     def inference(self, inputs, is_training):
 
         d_out = self.config.d_out
         feature = inputs['features']
-        feature = tf.layers.dense(feature, 8, activation=None, name='fc0')
-        feature = tf.nn.leaky_relu(tf.layers.batch_normalization(feature, -1, 0.99, 1e-6, training=is_training))
+        feature =tf.compat.v1.layers.dense(feature, 8, activation=None, name='fc0')
+        feature = tf.nn.leaky_relu(tf.compat.v1.layers.batch_normalization(feature, -1, 0.99, 1e-6, training=is_training))
         feature = tf.expand_dims(feature, axis=2)
 
         # ###########################Encoder############################
@@ -119,7 +119,7 @@ class Network:
             f_encoder_list.append(f_sampled_i)
         # ###########################Encoder############################
 
-        feature = tf_util.conv2d(f_encoder_list[-1], f_encoder_list[-1].get_shape()[3].value, [1, 1],
+        feature = tf_util.conv2d(f_encoder_list[-1], f_encoder_list[-1].get_shape()[3], [1, 1],
                                  'decoder_0', [1, 1], 'VALID', True, is_training)
 
         # ###########################Decoder############################
@@ -127,7 +127,7 @@ class Network:
         for j in range(self.config.num_layers):
             f_interp_i = self.nearest_interpolation(feature, inputs['interp_idx'][-j - 1])
             f_decoder_i = tf_util.conv2d_transpose(tf.concat([f_encoder_list[-j - 2], f_interp_i], axis=3),
-                                                   f_encoder_list[-j - 2].get_shape()[-1].value, [1, 1],
+                                                   f_encoder_list[-j - 2].get_shape()[-1], [1, 1],
                                                    'Decoder_layer_' + str(j), [1, 1], 'VALID', bn=True,
                                                    is_training=is_training)
             feature = f_decoder_i
@@ -265,7 +265,7 @@ class Network:
         class_weights = tf.convert_to_tensor(pre_cal_weights, dtype=tf.float32)
         one_hot_labels = tf.one_hot(labels, depth=self.config.num_classes)
         weights = tf.reduce_sum(class_weights * one_hot_labels, axis=1)
-        unweighted_losses = tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=one_hot_labels)
+        unweighted_losses = tf.compat.v1.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=one_hot_labels)
         weighted_losses = unweighted_losses * weights
         output_loss = tf.reduce_mean(weighted_losses)
         return output_loss
@@ -280,7 +280,7 @@ class Network:
         return tf.nn.leaky_relu(f_pc + shortcut)
 
     def building_block(self, xyz, feature, neigh_idx, d_out, name, is_training):
-        d_in = feature.get_shape()[-1].value
+        d_in = feature.get_shape()[-1]
         f_xyz = self.relative_pos_encoding(xyz, neigh_idx)
         f_xyz = tf_util.conv2d(f_xyz, d_in, [1, 1], name + 'mlp1', [1, 1], 'VALID', True, is_training)
         f_neighbours = self.gather_neighbour(tf.squeeze(feature, axis=2), neigh_idx)
@@ -313,7 +313,7 @@ class Network:
         d = feature.get_shape()[-1]
         batch_size = tf.shape(pool_idx)[0]
         pool_idx = tf.reshape(pool_idx, [batch_size, -1])
-        pool_features = tf.batch_gather(feature, pool_idx)
+        pool_features =  tf.compat.v1.batch_gather(feature, pool_idx)
         pool_features = tf.reshape(pool_features, [batch_size, -1, num_neigh, d])
         pool_features = tf.reduce_max(pool_features, axis=2, keepdims=True)
         return pool_features
@@ -329,7 +329,7 @@ class Network:
         batch_size = tf.shape(interp_idx)[0]
         up_num_points = tf.shape(interp_idx)[1]
         interp_idx = tf.reshape(interp_idx, [batch_size, up_num_points])
-        interpolated_features = tf.batch_gather(feature, interp_idx)
+        interpolated_features =  tf.compat.v1.batch_gather(feature, interp_idx)
         interpolated_features = tf.expand_dims(interpolated_features, axis=2)
         return interpolated_features
 
@@ -338,9 +338,9 @@ class Network:
         # gather the coordinates or features of neighboring points
         batch_size = tf.shape(pc)[0]
         num_points = tf.shape(pc)[1]
-        d = pc.get_shape()[2].value
+        d = pc.get_shape()[2]
         index_input = tf.reshape(neighbor_idx, shape=[batch_size, -1])
-        features = tf.batch_gather(pc, index_input)
+        features = tf.compat.v1.batch_gather(pc, index_input)
         features = tf.reshape(features, [batch_size, num_points, tf.shape(neighbor_idx)[-1], d])
         return features
 
@@ -349,9 +349,9 @@ class Network:
         batch_size = tf.shape(feature_set)[0]
         num_points = tf.shape(feature_set)[1]
         num_neigh = tf.shape(feature_set)[2]
-        d = feature_set.get_shape()[3].value
+        d = feature_set.get_shape()[3]
         f_reshaped = tf.reshape(feature_set, shape=[-1, num_neigh, d])
-        att_activation = tf.layers.dense(f_reshaped, d, activation=None, use_bias=False, name=name + 'fc')
+        att_activation = tf.compat.v1.layers.dense(f_reshaped, d, activation=None, use_bias=False, name=name + 'fc')
         att_scores = tf.nn.softmax(att_activation, axis=1)
         f_agg = f_reshaped * att_scores
         f_agg = tf.reduce_sum(f_agg, axis=1)
